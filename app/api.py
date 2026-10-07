@@ -212,7 +212,13 @@ async def chat(websocket: WebSocket, user_id: str, conversation_id: str):
                     if last_question and "Is this summary correct?" in last_question and "yes" in str(query).lower():
                         logger.info("Processing the chat and extracting details...")
                         await ws_connection.send_message(json.dumps({'response': "Your issue is being processed and we'll find a suitable geek for you shortly.", 'options': None}), websocket)
-                        
+
+                        # Control frame (no chat text): everything below - history fetch,
+                        # LLM extraction, geek matching - takes several seconds, and the
+                        # client has no other way to know a geek list is coming. It shows
+                        # a loader until the next frame with a "response" arrives.
+                        await ws_connection.send_message(json.dumps({'status': 'searching_geeks'}), websocket)
+
                         # A. fetch the full conversation history
                         logger.info('fetching the chat hisotry from database...')
                         history = await get_chat_history_with_agent(conversation_id, app.state.database)
@@ -245,7 +251,13 @@ async def chat(websocket: WebSocket, user_id: str, conversation_id: str):
                                 logger.error("No suitable geeks found")
                         except Exception as e:
                             logger.error(f"Error fetching geeks from user issue: {e}")
-                        
+                            # The socket closes right after this, so without a final frame
+                            # the client is left waiting on a geek list that never comes.
+                            try:
+                                await ws_connection.send_message(json.dumps({"response": "We ran into a problem while finding Geeks for you. Please try again later.", "options": None}), websocket)
+                            except Exception:
+                                pass
+
                         # D. Clean up and close the connection
                         del agent_last_question[conversation_id]
                         break # Exit the while loop to close the socket
