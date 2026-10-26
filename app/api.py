@@ -154,6 +154,30 @@ async def speech_to_text(file: UploadFile = File(...)):
 _json_decoder = json.JSONDecoder()
 
 
+def _find_response_object(text: str):
+    """Return the first JSON object in `text` that carries a "response" key.
+
+    Decoding only at offset 0 was not enough: the agent is told to answer as
+    JSON but often writes the question as prose and then repeats it as JSON
+    after it. That failed to parse, so the whole blob - question plus raw
+    JSON - was handed to the user as the message, and the options array was
+    thrown away so no choice buttons rendered. Scanning from each brace picks
+    the JSON out of surrounding prose instead.
+    """
+    start = text.find("{")
+    while start != -1:
+        try:
+            # raw_decode reads one complete JSON value and ignores any trailing
+            # text, rather than erroring the way json.loads does on "Extra data".
+            candidate, _ = _json_decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            candidate = None
+        if isinstance(candidate, dict) and candidate.get("response"):
+            return candidate
+        start = text.find("{", start + 1)
+    return None
+
+
 def _safe_parse_agent_response(text: str) -> dict:
     """Best-effort parse of the agent's JSON reply. Falls back to wrapping raw
     text as the response instead of raising, so a single malformed LLM reply
@@ -165,26 +189,24 @@ def _safe_parse_agent_response(text: str) -> dict:
         cleaned = cleaned.strip("`").strip()
         if cleaned.lower().startswith("json"):
             cleaned = cleaned[4:].strip()
-    parsed = None
-    try:
-        # raw_decode reads just the first complete JSON value and ignores
-        # anything after it, instead of erroring on "Extra data" the way
-        # json.loads does when the model emits more than one JSON object.
-        candidate, _ = _json_decoder.raw_decode(cleaned)
-        if isinstance(candidate, dict) and candidate.get("response"):
-            parsed = {"response": candidate["response"], "options": candidate.get("options")}
-    except json.JSONDecodeError:
-        pass
-    if parsed is None:
-        # This fallback is what the user reads as "something went wrong", so say in
-        # the log which of the two cases it was: an empty reply (the agent run
-        # failed upstream and returned None) or a reply we could not parse.
-        if not cleaned:
-            logger.error("Agent produced no response text - see 'Error during chain execution' above for the cause")
-        else:
-            logger.error(f"Could not parse agent response as JSON: {cleaned[:500]}")
-        parsed = {"response": cleaned or "Sorry, something went wrong. Could you please repeat that?", "options": None}
-    return parsed
+    candidate = _find_response_object(cleaned)
+    if candidate is not None:
+        return {"response": candidate["response"], "options": candidate.get("options")}
+
+    # This fallback is what the user reads as "something went wrong", so say in
+    # the log which of the two cases it was: an empty reply (the agent run
+    # failed upstream and returned None) or a reply we could not parse.
+    if not cleaned:
+        logger.error("Agent produced no response text - see 'Error during chain execution' above for the cause")
+    else:
+        logger.error(f"Could not parse agent response as JSON: {cleaned[:500]}")
+        # Last resort: a JSON blob must never be shown to the user, so drop
+        # everything from the first brace and keep only the prose before it.
+        brace_at = cleaned.find("{")
+        if brace_at != -1:
+            cleaned = cleaned[:brace_at].strip()
+
+    return {"response": cleaned or "Sorry, something went wrong. Could you please repeat that?", "options": None}
 
 
 @app.websocket("/chat/{user_id}")
