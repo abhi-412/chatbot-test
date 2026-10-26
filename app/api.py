@@ -176,6 +176,13 @@ def _safe_parse_agent_response(text: str) -> dict:
     except json.JSONDecodeError:
         pass
     if parsed is None:
+        # This fallback is what the user reads as "something went wrong", so say in
+        # the log which of the two cases it was: an empty reply (the agent run
+        # failed upstream and returned None) or a reply we could not parse.
+        if not cleaned:
+            logger.error("Agent produced no response text - see 'Error during chain execution' above for the cause")
+        else:
+            logger.error(f"Could not parse agent response as JSON: {cleaned[:500]}")
         parsed = {"response": cleaned or "Sorry, something went wrong. Could you please repeat that?", "options": None}
     return parsed
 

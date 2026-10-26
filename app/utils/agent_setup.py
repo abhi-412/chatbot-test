@@ -2,7 +2,7 @@ from langchain.memory import ConversationBufferMemory
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.tools import Tool
+from langchain_core.tools import StructuredTool, Tool
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 
 from pydantic import BaseModel, Field
@@ -19,6 +19,10 @@ class AgentResponse(BaseModel):
     
 class CategoryInput(BaseModel):
     category_slug: str = Field(description="The lowercase slug of the main category (e.g., 'cloud-service-and-maintain').")
+
+
+class NoInput(BaseModel):
+    """Schema for tools that take no arguments."""
 
 
 logger = setup_logger("GoD AI Chatbot: Agent Setup", "app.log")
@@ -132,13 +136,19 @@ class ChatAssistantChain:
                 )
             )
             self.tools.append(
-                Tool(
+                # Must be a StructuredTool with an empty schema, not a Tool. A bare
+                # Tool is single-input: with no args_schema it advertises a required
+                # string argument and always invokes func with exactly one value, so
+                # a zero-arg lambda raised TypeError the moment the agent reached for
+                # this tool (and passing no argument raised ToolException instead).
+                StructuredTool.from_function(
                     name="get_categories",
                     description="""
                     Retrieves a list of category names from the database.
                     Use this when you have to ask the user about categories of services.
                     """,
                     func=lambda: get_categories(db=db_instance),
+                    args_schema=NoInput,
                 )
             )
         else:
@@ -198,5 +208,8 @@ class ChatAssistantChain:
             response = await self.agent_executor.ainvoke({"input": user_input})
             return {"response": response["output"]}
         except Exception as e:
-            logger.error(f"Error during chain execution: {e}")
+            # exception() keeps the traceback: without it the one line below was the
+            # only trace of a crash that the user saw as "something went wrong",
+            # with nothing to say which tool or call actually blew up.
+            logger.exception(f"Error during chain execution: {e}")
             return None
