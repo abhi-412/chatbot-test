@@ -10,6 +10,7 @@ from typing import Optional, List
 from datetime import date
 
 from .agent_tools import get_subcategories_by_category_slug, get_brands_by_category_slug, get_categories
+from .llm_config import chat_model_name
 
 from ..logs.logger import setup_logger
 
@@ -107,7 +108,11 @@ class ChatAssistantChain:
         self.output_parser = parser
         self.callback_handler = callback_handler
         self.llm = ChatOpenAI(
-            model="o4-mini",
+            model=chat_model_name(),
+            # The agent's whole contract is "reply as JSON matching this schema",
+            # and ChatOpenAI defaults to temperature 0.7. Pin it low so tool calls
+            # and the JSON envelope stay stable.
+            temperature=0,
             # callbacks=[self.callback_handler] ,
         )
         self.db_instance = db_instance

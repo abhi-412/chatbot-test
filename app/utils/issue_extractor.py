@@ -3,13 +3,14 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
 from ..models.user_issue_model import UserIssueBase
+from .llm_config import chat_model_name
 from ..logs.logger import setup_logger
 
 logger = setup_logger("GoD AI Chatbot: Issue Extractor", "app.log")
 
 class IssueExtractor:
     def __init__(self):
-        self.llm = ChatOpenAI(model="o4-mini")
+        self.llm = ChatOpenAI(model=chat_model_name(), temperature=0)
         self.parser = JsonOutputParser(pydantic_object=UserIssueBase)
         self.prompt = ChatPromptTemplate.from_template(
             """
