@@ -40,6 +40,11 @@ logger = setup_logger("GoD AI Chatbot: Server", "app.log")
 
 origins = [
     "https://geekondemand.in",
+    # www is a distinct origin for CORS, and it is what sitemap.ts treats as the
+    # canonical production host - without it every HTTP call from prod (chat
+    # history, tts, stt, categories, geek paging) is blocked, while the socket
+    # still connects because CORSMiddleware does not gate WS handshakes.
+    "https://www.geekondemand.in",
     "http://localhost:3000",
     "http://localhost:3001",
     "https://god-test-frontend-hwhmfabjcvfscpgn.southindia-01.azurewebsites.net",
